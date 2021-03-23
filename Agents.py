@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch.distributions import Categorical
-from QMIX.policy import QMIX
+from pytouchMARL.policy import QMIX
 
 class Agents:
     def __init__(self, conf):
