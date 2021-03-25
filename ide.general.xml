@@ -1,0 +1,13 @@
+<application>
+  <component name="GeneralSettings">
+    <option name="confirmExit" value="false" />
+    <option name="showTipsOnStartup" value="false" />
+  </component>
+  <component name="StatusBar">
+    <option name="widgets">
+      <map>
+        <entry key="Position" value="false" />
+      </map>
+    </option>
+  </component>
+</application>
