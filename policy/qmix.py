@@ -47,7 +47,7 @@ class QMIX:
         self.eval_parameters = list(self.eval_qmix.parameters()) + list(self.eval_drqn.parameters())
         # 获取优化器
         if self.conf.optimizer == "RMS":
-            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=self.conf.lr)
+            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=conf.lr)
 
         # 执行过程中，为每个agent维护一个eval_hidden
         # 学习时，为每个agent维护一个eval_hidden, target_hidden
@@ -102,7 +102,7 @@ class QMIX:
         q_evals = torch.gather(q_evals, dim=3, index=u).squeeze(3)
 
         # 得到target_q，取所有行为中最大的 Q 值
-        q_targets[avail_u_ == 0.0] = -9999999
+        q_targets[avail_u_ == 0.0] = - 9999999
         q_targets = q_targets.max(dim=3)[0]
         # print("q_evals2 shape: ", q_evals.size()) # [batch_size, max_episode_len, n_agents]
 
@@ -131,7 +131,7 @@ class QMIX:
 
     def init_hidden(self, episode_num):
         """
-            为每个episode初始化一个eval_hidden,target_hidden
+        为每个episode初始化一个eval_hidden,target_hidden
         :param episode_num:
         :return:
         """
@@ -143,7 +143,7 @@ class QMIX:
         q_evals, q_targets = [], []
         for transition in range(max_episode_len):
             # 为每个obs加上agent编号和last_action
-            inputs, inputs_ = self._get_inputs(batch, transition_idx)
+            inputs, inputs_ = self._get_inputs(batch, transition)
             inputs = inputs.to(self.device)  # [batch_size*n_agents, obs_shape+n_agents+n_actions]
             inputs_ = inputs_.to(self.device)
 
@@ -153,7 +153,7 @@ class QMIX:
             q_eval, self.eval_hidden = self.eval_drqn(inputs, self.eval_hidden)
             q_target, self.target_hidden = self.target_drqn(inputs, self.target_hidden)
 
-            # 形状变化
+            # 形状变化，把q_eval维度重新变回(8, 5,n_actions)
             q_eval = q_eval.view(episode_num, self.n_agents, -1)
             q_target = q_target.view(episode_num, self.n_agents, -1)
             # 添加transition信息
@@ -169,7 +169,7 @@ class QMIX:
     def get_inputs(self, batch, transition_idx):
         # 取出所有episode上该transition_idx的经验，onehot_u要用到上一条故取出所有
         obs, obs_, onehot_u = batch['o'][:, transition_idx],\
-                              batch['o_'][:,transition_idx], batch['onehot_u'][:]
+                              batch['o_'][:, transition_idx], batch['onehot_u'][:]
         inputs, inputs_ = [], []
         inputs.append(obs)
         inputs_.append(obs_)
@@ -178,6 +178,7 @@ class QMIX:
 
         # obs添上一个动作，agent编号
         if self.conf.last_action:
+            # 如果是第一条经验，就让前一个动作为0向量
             if transition_idx == 0:
                 inputs.append(torch.zeros_like(onehot_u[:, transition_idx]))
             else:
