@@ -1,7 +1,7 @@
 import torch
 import os
-from pytouchMARL.network.base_NN import DRQN
-from pytouchMARL.network.QMIX_NN import QmixNN
+from pytorchMARL.network.base_NN import DRQN
+from pytorchMARL.network.QMIX_NN import QmixNN
 
 class QMIX:
     def __init__(self, conf):

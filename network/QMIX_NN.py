@@ -42,7 +42,7 @@ class QmixNN(nn.Module):
     """
     def forward(self, q_values, states):
         # print(args.state_shape)
-        episode_num == q_values.size(0)
+        episode_num = q_values.size(0)
         q_values = q_values.view(-1, 1, self.conf.n_agents)  # (episode_num * max_episode_len, 1, n_agents)
         states = states.reshape(-1, self.conf.state_shape)  # (episode_num * max_episode_len, state_shape)
 

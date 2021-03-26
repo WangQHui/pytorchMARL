@@ -117,9 +117,9 @@ class QtranBase:
 
         opt_onehot_target = torch.zeros(*individual_q_targets.shape)
         opt_action_target = individual_q_targets.argmax(dim=3, keepdim=True)
-        opt_onehot_target = opt_onehot_target.scatter(-1, opt_onehot_target[:, :].cpu(), 1)
+        opt_onehot_target = opt_onehot_target.scatter(-1, opt_action_target[:, :].cpu(), 1)
 
-        # ------------------------ L_td -------------------------------
+        # ------------------------ L_td 真实动作值的损失-------------------------------
         # 计算joint_q和v
         # joint_q、v的维度为(episode个数, max_episode_len, 1), 而且joint_q在后面的L_nopt还要用到
         joint_q_evals, joint_q_targets, v = self.get_qtran(batch, hidden_evals, hidden_targets, opt_onehot_target)
