@@ -14,6 +14,7 @@ class Qtran_base(nn.Module):
         # 将所有agent的hidden_state和动作相加得到近似的联合hidden_state和动作
         ae_input = conf.rnn_hidden_dim + conf.n_actions
         self.hidden_action_encoding = nn.Sequential(nn.Linear(ae_input, ae_input),
+
                                                     nn.ReLU(),
                                                     nn.Linear(ae_input, ae_input))
 

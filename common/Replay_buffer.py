@@ -37,6 +37,7 @@ class ReplayBuffer:
                 self.buffer[key][idxes] = episode_batch[key]
             # 更新当前buffer的大小
 
+    # 采样方法 .sample() 用来在训练过程中随机的选择一个迁移批次(batch of transitions)
     def sample(self, batch_size):
         """
         采样部分episode
