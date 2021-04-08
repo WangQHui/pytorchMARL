@@ -5,39 +5,39 @@ from pytorchMARL.network.base_NN import DRQN
 from pytorchMARL.network.Qtran import Qtran_base, QtranV
 
 class QtranBase:
-    def __init__(self, conf):
-        self.conf = conf
-        self.n_agents = conf.n_agents
-        self.n_actions = conf.n_actions
-        self.state_shape = conf.state_shape
-        self.obs_shape = conf.obs_shape
+    def __init__(self, args):
+        self.args = args
+        self.n_agents = args.n_agents
+        self.n_actions = args.n_actions
+        self.state_shape = args.state_shape
+        self.obs_shape = args.obs_shape
         input_shape = self.obs_shape
 
         # 根据参数决定DRQN的输入维度
-        if self.conf.last_action:
+        if self.args.last_action:
             # 当前agent的上一个动作的独热码向量
             input_shape += self.n_actions
-        if self.conf.reuse_network:
+        if self.args.reuse_network:
             input_shape += self.n_agents
 
         # 神经网络
         # 每个agent选动作的网络
-        self.eval_drqn = DRQN(input_shape, conf).to(self.device)
-        self.target_drqn = DRQN(input_shape, conf).to(self.device)
+        self.eval_drqn = DRQN(input_shape, args).to(self.device)
+        self.target_drqn = DRQN(input_shape, args).to(self.device)
         # joint动作价值网络
-        self.eval_joint_qtran = QtranBase(conf).to(self.device)
-        self.target_joint_qtran = QtranBase(conf).to(self.device)
+        self.eval_joint_qtran = QtranBase(args).to(self.device)
+        self.target_joint_qtran = QtranBase(args).to(self.device)
 
-        self.v = QtranV(conf)
+        self.v = QtranV(args)
 
-        self.model_dir = self.conf.model_dir + '/' + conf.alg + '/' + conf.map
+        self.model_dir = self.args.model_dir + '/' + args.alg + '/' + args.map
         # 如果存在模型则加载模型
-        if self.conf.load_model:
+        if self.args.load_model:
             if os.path.exists(self.model_dir + '/1_drqn_net_params.pkl'):
                 drqn_path = self.model_dir + '/1_drqn_net_params.pkl'
                 joint_qtran_path = self.model_dir + '/1_joint_qtran_net_params.pkl'
                 v_path = self.model_dir + '/1_v_params.pkl'
-                map_location = 'cuda:2' if self.conf.cuda else 'cpu'
+                map_location = 'cuda:2' if self.args.cuda else 'cpu'
                 self.eval_drqn.load_state_dict(torch.load(drqn_path, map_location=map_location))
                 self.eval_joint_qtran.load_state_dict(torch.load(joint_qtran_path, map_location=map_location))
                 self.eval_v.load_state_dict(torch.load(v_path, map_location=map_location))
@@ -125,7 +125,7 @@ class QtranBase:
         joint_q_evals, joint_q_targets, v = self.get_qtran(batch, hidden_evals, hidden_targets, opt_onehot_target)
 
         # loss
-        y_dqn = r.squeeze(-1) + self.conf.gamma * joint_q_targets * (1 - terminated.squeeze(-1))
+        y_dqn = r.squeeze(-1) + self.args.gamma * joint_q_targets * (1 - terminated.squeeze(-1))
         td_error = joint_q_evals - y_dqn.detach()
         l_td = ((td_error*mask) ** 2).sum() / mask.sum()
         # ------------------------ L_td -------------------------------
@@ -156,13 +156,13 @@ class QtranBase:
         # ------------------------ L_nopt -------------------------------
 
         print('l_td is {}, l_opt is {}, l_nopt is {}'.format(l_td, l_opt, l_nopt))
-        loss =l_td + self.conf.lambda_opt*l_opt + self.conf.lambda_nopt*l_nopt
+        loss =l_td + self.args.lambda_opt*l_opt + self.args.lambda_nopt*l_nopt
         self.optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.eval_parameters, self.conf.grad_norm_clip)
+        nn.utils.clip_grad_norm_(self.eval_parameters, self.args.grad_norm_clip)
         self.optimizer.step()
 
-        if train_step > 0 and train_step % self.conf.update_target_params == 0:
+        if train_step > 0 and train_step % self.args.update_target_params == 0:
             self.target_drqn.load_state_dict(self.eval_drqn.state_dict())
             self.target_joint_qtran.load_state_dict(self.eval_joint_qtran.state_dict())
 
@@ -172,8 +172,8 @@ class QtranBase:
         :param episode_num:
         :return:
         """
-        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.conf.dqrn_hidden_dim))
-        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.conf.dqrn_hidden_dim))
+        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.dqrn_hidden_dim))
+        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.args.dqrn_hidden_dim))
 
     def _get_individual_q(self, batch, max_episode_len):
         episode_num = batch['o'].shape[0]
@@ -224,21 +224,21 @@ class QtranBase:
         inputs_.append(obs_)
 
         # 为每个obs加上agent编号和last_action
-        if self.conf.last_action:
+        if self.args.last_action:
             # 如果是第一条经验，就让前一个动作为0向量
             if transition_idx == 0:
                 inputs.append(torch.zeros_like(onehot_u[:, transition_idx]))
             else:
                 inputs.append(onehot_u[:, transition_idx - 1])
             inputs_.append(onehot_u[:, transition_idx])
-        if self.conf.reuse_network:
+        if self.args.reuse_network:
             """
             因为当前的obs三维的数据，每一维分别代表(episode编号，agent编号，obs维度)，直接在dim_1上添加对应的向量即可，
             比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。
             而agent_0的数据正好在第0行，那么需要加的agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
             """
-            inputs.append(torch.eye(self.conf.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
-            inputs_.append(torch.eye(self.conf.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
+            inputs.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
+            inputs_.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
 
         # 把batch_size, n_agents的agents的obs拼接起来
         # 因为这里所有的所有agent共享一个神经网络，每条数据中带上了自己的编号，所以还是自己的数据
@@ -280,7 +280,7 @@ class QtranBase:
         return q_evals, q_targets, v
 
     def save_model(self, train_step):
-        num = str(train_step // self.conf.save_frequency)
+        num = str(train_step // self.args.save_frequency)
 
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)

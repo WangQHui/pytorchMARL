@@ -5,43 +5,43 @@ import numpy as np
 
 
 class Qatten(nn.Module):
-    def __init__(self, conf):
+    def __init__(self, args):
         super(Qatten, self).__init__()
 
-        self.conf = conf
+        self.args = args
 
         self.key_extractors = nn.ModuleList()
         self.selector_extractors = nn.ModuleList()
 
-        if conf.two_hyper_layers:
+        if args.two_hyper_layers:
             # 多头注意力机制
             for i in range(self.n_head):
-                selector_nn = nn.Sequential(nn.Linear(conf.state_shape, conf.hyper_hidden_dim),
+                selector_nn = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
                                             nn.ReLU(),
-                                            nn.Linear(conf.hyper_hidden_dim, conf.mixing_embed_dim))
+                                            nn.Linear(args.hyper_hidden_dim, args.mixing_embed_dim))
                 # 查询
                 self.selector_extractors.append(selector_nn)
                 # 加入qs
                 if conf.nonlinear:
-                    self.key_extractors.append(nn.Linear(conf.unit_dim+1, conf.mixing_embed_dim, bias=False))
+                    self.key_extractors.append(nn.Linear(args.unit_dim+1, args.mixing_embed_dim, bias=False))
                 else:
-                    self.key_extractors.append(nn.Linear(conf.unit_dim, conf.mixing_embed_dim, bias=False))
+                    self.key_extractors.append(nn.Linear(args.unit_dim, args.mixing_embed_dim, bias=False))
             if conf.weighted_head:
-                self.hyper_w_head = nn.Sequential(nn.Linear(conf.state_shape, conf.hyper_hidden_dim),
+                self.hyper_w_head = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
                                                   nn.ReLU(),
-                                                  nn.Linear(conf.hyper_hidden_dim, conf.n_head))
+                                                  nn.Linear(args.hyper_hidden_dim, args.n_head))
         else:
             for i in range(self.n_head):
-                self.selector_extractors.append(nn.Linear(conf.state_shape, conf.mixing_embed_dim, bias=False))
-                if conf.nonlinear:
-                    self.key_extractors.append(nn.Linear(conf.unit_dim+1, conf.mixing_embed_dim, bias=False))
+                self.selector_extractors.append(nn.Linear(args.state_shape, args.mixing_embed_dim, bias=False))
+                if args.nonlinear:
+                    self.key_extractors.append(nn.Linear(args.unit_dim+1, args.mixing_embed_dim, bias=False))
                 else:
-                    self.key_extractors.append(nn.Linear(conf.unit_dim, conf.mixing_embed_dim, bias=False))
-            if conf.weighted_head:
-                self.hyper_w_head = nn.Linear(conf.state_shape, conf.n_head)
+                    self.key_extractors.append(nn.Linear(args.unit_dim, args.mixing_embed_dim, bias=False))
+            if args.weighted_head:
+                self.hyper_w_head = nn.Linear(args.state_shape, args.n_head)
 
         # 用V代替最后一层的偏移量
-        self.V = nn.Sequential(nn.Linear(self.state_shape, conf.mixing_embed_dim),
+        self.V = nn.Sequential(nn.Linear(self.state_shape, args.mixing_embed_dim),
                                nn.ReLU(),
                                nn.Linear(self.mixing_embed_dim, 1))
 

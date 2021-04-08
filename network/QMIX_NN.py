@@ -3,9 +3,9 @@ import torch
 import torch.nn.functional as F
 
 class QmixNN(nn.Module):
-    def __init__(self, conf):
+    def __init__(self, args):
         super(QmixNN, self).__init__()
-        self.conf = conf
+        self.args = args
         """
                 生成的hyper_w1需要是一个矩阵，但是torch NN的输出只能是向量；
                 因此先生成一个（行*列）的向量，再reshape
@@ -13,26 +13,26 @@ class QmixNN(nn.Module):
                 args.n_agents是使用hyper_w1作为参数的网络的输入维度， args.qmix_hidden_dim是网络隐藏层参数个数
                 从而经过hyper_w1得到（经验条数， args.n_agents * args.qmix_hidden_dim)的矩阵
         """
-        if conf.two_hyper_layers:
-            self.hyper_w1 = nn.Sequential(nn.Linear(conf.state_shape, conf.hyper_hidden_dim),
+        if args.two_hyper_layers:
+            self.hyper_w1 = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
                                           nn.ReLU(),
-                                          nn.Linear(conf.hyper_hidden_dim, conf.n_agents * conf.qmix_hidden_dim))
+                                          nn.Linear(args.hyper_hidden_dim, args.n_agents * args.qmix_hidden_dim))
             # 经过hyper_w2 得到的（经验条数， 1）的矩阵
-            self.hyper_w2 = nn.Sequential(nn.Linear(conf.state_shape, conf.hyper_hidden_dim),
+            self.hyper_w2 = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
                                           nn.ReLU(),
-                                          nn.Linear(conf.hyper_hidden_dim, conf.qmix_hidden_dim))
+                                          nn.Linear(args.hyper_hidden_dim, args.qmix_hidden_dim))
 
         else:
-            self.hyper_w1 = nn.Linear(self.state_shape, conf.n_agents * conf.qmix_hidden_dim)
+            self.hyper_w1 = nn.Linear(self.state_shape, args.n_agents * args.qmix_hidden_dim)
             # 经过hyper_w2 得到的（经验条数， 1）的矩阵
-            self.hyper_w2 = nn.Linear(self.state_shape, conf.qmix_hidden_dim)
+            self.hyper_w2 = nn.Linear(self.state_shape, args.qmix_hidden_dim)
 
         # hyper_b1 得到的（经验条数，args.qmix_hidden_dim)矩阵需要同样维度的hyper_b1
-        self.hyper_b1 == nn.Linear(conf.state_shape, conf.qmix_hidden_dim)
+        self.hyper_b1 == nn.Linear(args.state_shape, args.qmix_hidden_dim)
         # hyper_b1 得到的（经验条数， 1）的矩阵需要同样维度的hyper_b1
-        self.hyper_b2 == nn.Sequential(nn.Linear(conf.state_shape, conf.qmix_hidden_dim),
+        self.hyper_b2 == nn.Sequential(nn.Linear(args.state_shape, args.qmix_hidden_dim),
                                        nn.ReLU(),
-                                       nn.Linear(conf.qmix_hidden_dim, 1))
+                                       nn.Linear(args.qmix_hidden_dim, 1))
 
 
     """

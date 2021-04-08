@@ -4,36 +4,36 @@ from pytorchMARL.network.base_NN import DRQN
 from pytorchMARL.network.QMIX_NN import QmixNN
 
 class QMIX:
-    def __init__(self, conf):
-        self.conf = conf
-        self.device = self.conf.device
-        self.n_actions = self.conf.n_actions
-        self.n_agents = self.conf.n_agents
-        self.state_shape = self.conf.state_shape
-        self.obs_shape = self.conf.obs_shape
+    def __init__(self, args):
+        self.args = args
+        self.device = self.args.device
+        self.n_actions = self.args.n_actions
+        self.n_agents = self.args.n_agents
+        self.state_shape = self.args.state_shape
+        self.obs_shape = self.args.obs_shape
         input_shape = self.obs_shape
 
         # 根据参数决定DQRN的输入维度
-        if self.conf.last_action:
+        if self.args.last_action:
             input_shape += self.n_actions
-        if self.conf.reuse_network:
+        if self.args.reuse_network:
             input_shape += self.n_agents
 
         # 神经网络
-        self.eval_drqn = DRQN(input_shape, self.conf).to(self.device)
-        self.target_drqn = DRQN(input_shape, self.conf).to(self.device)
+        self.eval_drqn = DRQN(input_shape, self.args).to(self.device)
+        self.target_drqn = DRQN(input_shape, self.args).to(self.device)
 
-        self.eval_qmix = QmixNN(self.conf).to(self.device)
-        self.target_qmix = QmixNN(self.conf).to(self.device)
+        self.eval_qmix = QmixNN(self.args).to(self.device)
+        self.target_qmix = QmixNN(self.args).to(self.device)
 
 
-        self.model_dir = self.conf.model_dir
+        self.model_dir = self.args.model_dir
 
-        if self.conf.load_model:
+        if self.args.load_model:
             if os.path.exists(self.model_dir + '/1_drqn_net_params.pkl'):
                 drqn_path = self.model_dir + '/1_drqn_net_params.pkl'
                 qmix_path = self.model_dir + '/1_qmix_net_params.pkl'
-                map_location = 'cuda:2' if self.conf.cuda else 'cpu'
+                map_location = 'cuda:2' if self.args.cuda else 'cpu'
                 self.eval_drqn.load_state_dict(torch.load(drqn_path, map_location=map_location))
                 self.eval_qmix.load_state_dict(torch.load(qmix_path, map_location=map_location))
                 print("successfully load models")
@@ -46,8 +46,8 @@ class QMIX:
         # 获取所有参数
         self.eval_parameters = list(self.eval_qmix.parameters()) + list(self.eval_drqn.parameters())
         # 获取优化器
-        if self.conf.optimizer == "RMS":
-            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=conf.lr)
+        if self.args.optimizer == "RMS":
+            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=args.lr)
 
         # 执行过程中，为每个agent维护一个eval_hidden
         # 学习时，为每个agent维护一个eval_hidden, target_hidden
@@ -111,7 +111,7 @@ class QMIX:
         q_total_target = self.target_qmix(q_targets, s_)
 
         # 计算一步 qmix的target
-        targets = r + self.conf.gamma * q_total_target * (1 - terminated)
+        targets = r + self.args.gamma * q_total_target * (1 - terminated)
         # 参数更新
         td_error = (q_total_eval - targets.detach())
         masked_td_error = mask * td_error
@@ -121,11 +121,11 @@ class QMIX:
         # 优化
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.eval_parameters, self.conf.grad_norm_clip)
+        torch.nn.utils.clip_grad_norm_(self.eval_parameters, self.args.grad_norm_clip)
         self.optimizer.step()
 
         # 在指定周期更新 target network 的参数
-        if train_step > 0 and train_step % self.conf.update_target_params == 0:
+        if train_step > 0 and train_step % self.args.update_target_params == 0:
             self.target_drqn.load_state_dict(self.eval_drqn.state_dict())
             self.target_qmix.load_state_dict(self.eval_qmix.state_dict())
 
@@ -135,8 +135,8 @@ class QMIX:
         :param episode_num:
         :return:
         """
-        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.conf.drqn_hidden_dim))
-        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.conf.drqn_hidden_dim))
+        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.drqn_hidden_dim))
+        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.args.drqn_hidden_dim))
 
     def get_q_values(self, batch, max_episode_len):
         episode_num = batch['o'].shape[0]
@@ -177,14 +177,14 @@ class QMIX:
         episode_num = obs.shape[0]
 
         # obs添上一个动作，agent编号
-        if self.conf.last_action:
+        if self.args.last_action:
             # 如果是第一条经验，就让前一个动作为0向量
             if transition_idx == 0:
                 inputs.append(torch.zeros_like(onehot_u[:, transition_idx]))
             else:
                 inputs.append(onehot_u[:, transition_idx-1])
             inputs_.append(onehot_u[:, transition_idx])
-        if self.conf.reuse_network:
+        if self.args.reuse_network:
             """
             因为当前的obs三维的数据，每一维分别代表(episode编号，agent编号，obs维度)，直接在dim_1上添加对应的向量即可，
             比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。
@@ -202,7 +202,7 @@ class QMIX:
         return inputs, inputs_
 
     def save_model(self, train_step):
-        num = str(train_step // self.conf.save_frequency)
+        num = str(train_step // self.args.save_frequency)
 
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
