@@ -22,11 +22,11 @@ class Qatten(nn.Module):
                 # 查询
                 self.selector_extractors.append(selector_nn)
                 # 加入qs
-                if conf.nonlinear:
+                if args.nonlinear:
                     self.key_extractors.append(nn.Linear(args.unit_dim+1, args.mixing_embed_dim, bias=False))
                 else:
                     self.key_extractors.append(nn.Linear(args.unit_dim, args.mixing_embed_dim, bias=False))
-            if conf.weighted_head:
+            if args.weighted_head:
                 self.hyper_w_head = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
                                                   nn.ReLU(),
                                                   nn.Linear(args.hyper_hidden_dim, args.n_head))
