@@ -54,8 +54,8 @@ class QtranBase:
                                list(self.eval_joint_qtran.parameters()) + \
                                list(self.v.parameters())
         # 获取优化器
-        if conf.optimizer == "RMS":
-            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=conf.lr)
+        if args.optimizer == "RMS":
+            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=args.lr)
 
         # 执行过程中，为每个agent维护一个eval_hidden
         # 学习时，为每个agent维护一个eval_hidden, target_hidden

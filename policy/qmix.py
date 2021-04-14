@@ -114,6 +114,7 @@ class QMIX:
         targets = r + self.args.gamma * q_total_target * (1 - terminated)
         # 参数更新
         td_error = (q_total_eval - targets.detach())
+        # 抹掉填充的经验的td_error
         masked_td_error = mask * td_error
 
         # L2的损失函数，不能直接用mean，因为还有许多经验是没用的，所以要求和再比真实的经验数，才是真正的均值
