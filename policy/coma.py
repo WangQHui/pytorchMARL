@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import os
 from pytorchMARL.network.base_NN import DRQN
 from pytorchMARL.network.ComaCritic import ComaCritic
@@ -117,7 +118,199 @@ class COMA:
         else:
             onehot_u_ = torch.zeros(*onehot_u.shape)
 
-        # s和s_next是二维的，没有n_agents维度，因为所有agent的s一样。其他都是三维的，到时候不能拼接，所以要把s转化成三维的
+        # s和s_是二维的，没有n_agents维度，因为所有agent的s一样。其他都是三维的，到时候不能拼接，所以要把s转化成三维的
+        s = s.unsqueeze(1).expend(-1, self.n_agents, -1)
+        s_ = s_.unsqueeze(1).expend(-1, self.n_agents, -1)
+        episode_num = obs.shape[0]
+        # 因为coma的critic用到的是所有agent的动作，所以要把onehot_u最后一个维度上当前agent的动作变成所有agent的动作
+        onehot_u = onehot_u.view((episode_num, 1, -1)).repeat(1, self.n_agents, 1)
+        onehot_u_ = onehot_u_.view((episode_num, 1, -1)).repeat(1, self.n_agents, 1)
+
+        if transition_idx == 0:
+            onehot_u_last = torch.zeros_like(onehot_u)
+        else:
+            onehot_u_last = batch['onehot_u'][:, transition_idx - 1]
+            onehot_u_last = onehot_u_last.view((episode_num, 1, -1)).repeat(1, self.n_agents, 1)
+
+        inputs, inputs_ = [], []
+        # 添加状态
+        inputs.append(s)
+        inputs_.append(s_)
+        # 添加obs
+        inputs.append(obs)
+        inputs_.append(obs_)
+        # 添加所有agent的上一个动作
+        inputs.append(onehot_u_last)
+        inputs_.append(onehot_u)
+
+        # 添加当前动作
+        '''
+        因为coma对于当前动作，输入的是其他agent的当前动作，不输入当前agent的动作，为了方便起见，
+        每次虽然输入当前agent的当前动作，但是将其置为0相量，也就相当于没有输入。
+        '''
+        action_mask = (1 - torch.eye(self.n_agents))  # 生成一个二维对角矩阵
+        # 得到一个矩阵action_mask，用来将(episode_num, n_agents, n_agents * n_actions)的actions中每个agent自己的动作变成0向量
+        action_mask = action_mask.view(-1, 1).repeat(1, self.n_actions).view(self.n_agents, -1)
+        inputs.append(onehot_u * action_mask.unsqueeze(0))
+        inputs_.append(onehot_u_ * action_mask.unsqueeze(0))
+
+        # 添加agent编号对应的one-hot向量
+        '''
+        因为当前的inputs三维的数据，每一维分别代表(episode编号，agent编号，inputs维度)，直接在后面添加对应的向量即可，
+        比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。而agent_0的数据正好在第0行，那么需要加的
+        agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
+        '''
+        inputs.append(torch.eye(self.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
+        inputs_.append(torch.eye(self.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
+
+        # 要把inputs中的5项输入拼起来，并且要把其维度从(episode_num, n_agents, inputs)三维
+        # 转换成(episode_num * n_agents, inputs)二维
+        inputs = torch.cat([x.reshape(episode_num * self.n_agents, -1) for x in inputs], dim=1)
+        inputs_ = torch.cat([x.reshape(episode_num * self.n_agents, -1) for x in inputs_], dim=1)
+
+        return inputs, inputs_
+
+    def _get_q_values(self, batch, max_episode_len):
+        episode_num = batch['o'].shape[0]
+        q_evals, q_targets = [], []
+        for transition_idx in range(max_episode_len):
+            inputs, inputs_ = self._get_critic_inputs(batch, transition_idx, max_episode_len)
+            if self.args.cuda:
+                inputs = inputs.cuda()
+                inputs_ = inputs_.cuda()
+            # 神经网络输入的是(episode_num * n_agents, inputs)二维数据，
+            # 得到的是(episode_num * n_agents， n_actions)二维数据
+            q_eval = self.eval_critic(inputs)
+            q_target = self.target_critic(inputs_)
+
+            # 把q值的维度重新变回(episode_num, n_agents, n_actions)
+            q_eval = q_eval.view(episode_num, self.n_agents, -1)
+            q_target = q_target.view(episode_num, self.n_agents, -1)
+            q_evals.append(q_eval)
+            q_targets.append(q_target)
+
+        # 得的q_evals和q_targets是一个列表，列表里装着max_episode_len个数组，数组的的维度是(episode个数, n_agents，n_actions)
+        # 把该列表转化成(episode个数, max_episode_len， n_agents，n_actions)的数组
+        q_evals = torch.stack(q_evals, dim=1)
+        q_targets = torch.stack(q_targets, dim=1)
+        return q_evals, q_targets
+
+    def _get_actor_inputs(self, batch, transition_idx):
+        # 取出所有episode上该transition_idx的经验，onehot_u要取出所有，因为要用到上一条
+        obs, onehot_u = batch['o'][:, transition_idx], batch['onehot_u'][:]
+        episode_num = obs.shape[0]
+        inputs = []
+        inputs.append(obs)
+        # 给inputs添加上一个动作、agent编号
+
+        if self.args.last_action:
+            if transition_idx == 0:
+                inputs.append(torch.zeros_like(onehot_u[:, transition_idx]))
+            else:
+                inputs.append(onehot_u[:, transition_idx - 1])
+        if self.args.reuse_network:
+            # 因为当前的inputs三维的数据，每一维分别代表(episode编号，agent编号，inputs维度)，直接在dim_1上添加对应的向量
+            # 即可，比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。而agent_0的数据正好在第0行，那么需要加的
+            # agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
+            inputs.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
+        # 要把inputs中的三个拼起来，并且要把episode_num个episode、self.args.n_agents个agent的数据拼成40条(40,96)的数据，
+        # 因为这里所有agent共享一个神经网络，每条数据中带上了自己的编号，所以还是自己的数据
+        inputs = torch.cat([x.reshape(episode_num * self.args.n_agents, -1) for x in inputs], dim=1)
+        return inputs
+
+    def _get_action_probs(self, batch, max_episode_len, epsilon):
+        episode_num = batch['o'].shape[0]
+        # coma不用target_actor，所以不需要最后一个obs的下一个可执行动作
+        avail_actions = batch['avail_u']
+        action_prob = []
+        for transition_idx in range(max_episode_len):
+            inputs = self._get_actor_inputs(batch, transition_idx)  # 给obs加last_action、agent_id
+            if self.args.cuda:
+                inputs = inputs.cuda()
+                self.eval_hidden = self.eval_hidden.cuda()
+            outputs, self.eval_hidden = self.eval_drqn(inputs, self.eval_hidden)  # inputs维度为(40,96)，得到的q_eval维度为(40,n_actions)
+            # 把q_eval维度重新变回(8, 5,n_actions)
+            outputs = outputs.view(episode_num, self.n_agents, -1)
+            prob = F.softmax(outputs, dim=-1)
+            action_prob.append(prob)
+        # 得的action_prob是一个列表，列表里装着max_episode_len个数组，
+        # 数组的的维度是(episode个数, n_agents，n_actions)
+        # 把该列表转化成(episode个数, max_episode_len， n_agents，n_actions)的数组
+        action_prob = torch.stack(action_prob, dim=1).cpu()
+
+        action_num = avail_actions.sum(dim=-1, keepdim=True).float().repeat(1, 1, 1, avail_actions.shape[-1])  # 可以选择的动作个数
+        action_prob = ((1 - epsilon) * action_prob + torch.ones_like(action_prob) * epsilon / action_num)
+        action_prob[avail_actions == 0] = 0.0  # 不能执行的动作概率为0
+
+        # 因为上面把不能执行的动作概率置为0，所以概率和不为1了，这里要重新正则化一下。执行过程中Categorical会自己正则化
+        action_prob = action_prob / action_prob.sum(dim=-1, keepdim=True)
+        # 因为有许多经验是填充的，它们的avail_actions都填充的是0，所以该经验上所有动作的概率都为0，在正则化的时候会得到nan
+        # 因此需要再一次将该经验对应的概率置为0
+        action_prob[avail_actions == 0] = 0.0
+        if self.args.cuda:
+            action_prob = action_prob.cuda()
+        return action_prob
+
+    def init_hidden(self, episode_num):
+        # 为每个episode中的每个agent都初始化一个eval_hidden
+        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.drqn_hidden_dim))
+
+    def _train_critic(self, batch, max_episode_len, train_step):
+        u, r, avail_u, terminated = batch['u'], batch['r'], batch['avail_u'], batch['terminated']
+        u_ = u[:, 1:]
+        padded_u_ = torch.zeros(*u[:, -1].shape, dtype=torch.long).unsqueeze(1)
+        u_ = torch.cat((u_, padded_u_), dim=1)
+        # 用来把那些填充的经验的TD-error置0，从而不让它们影响到学习
+        mask = (1 - batch["padded"].float()).repeat(1, 1, self.n_agents)
+        if self.args.cuda:
+            u = u.cuda()
+            u_ = u_.cuda()
+            mask = mask.cuda()
+        # 得到每个agent对应的Q值，维度为(episode个数, max_episode_len， n_agents，n_actions)
+        # q_next_target为下一个状态-动作对应的target网络输出的Q值，没有包括reward
+        q_evals, q_next_target = self._get_q_values(batch, max_episode_len)
+        q_values = q_evals.clone()  # 在函数的最后返回，用来计算advantage从而更新actor
+        # 取每个agent动作对应的Q值，并且把最后不需要的一维去掉，因为最后一维只有一个值了
+
+        q_evals = torch.gather(q_evals, dim=3, index=u).squeeze(3)
+        q_next_target = torch.gather(q_next_target, dim=3, index=u_).squeeze(3)
+        targets = td_lambda_target(batch, max_episode_len, q_next_target.cpu(), self.args)
+        if self.args.cuda:
+            targets = targets.cuda()
+        td_error = targets.detach() - q_evals
+        masked_td_error = mask * td_error  # 抹掉填充的经验的td_error
+
+        # 不能直接用mean，因为还有许多经验是没用的，所以要求和再比真实的经验数，才是真正的均值
+        loss = (masked_td_error ** 2).sum() / mask.sum()
+        print('Loss is ', loss)
+        self.critic_optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic_parameters, self.args.grad_norm_clip)
+        self.critic_optimizer.step()
+        if train_step > 0 and train_step % self.args.update_target_params == 0:
+            self.target_critic.load_state_dict(self.eval_critic.state_dict())
+        return q_values
+
+    def save_model(self, train_step):
+        num = str(train_step // self.args.save_frequency)
+        if not os.path.exists(self.model_dir):
+            os.makedirs(self.model_dir)
+
+        print("save model: {} epoch.".format(num))
+
+        torch.save(self.eval_drqn.state_dict(), self.model_dir+'/'+num+'_drqn_params.pkl')
+        torch.save(self.eval_critic.state_dict(), self.model_dir+'/'+num+'_critic_params.pkl')
+
+
+
+
+
+
+
+
+
+
+
 
 
 
