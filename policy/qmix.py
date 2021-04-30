@@ -26,8 +26,7 @@ class QMIX:
         self.eval_qmix = QmixNN(self.args).to(self.device)
         self.target_qmix = QmixNN(self.args).to(self.device)
 
-
-        self.model_dir = self.args.model_dir
+        self.model_dir = self.args.model_dir + '/' + args.alg + '/' + args.map
 
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/1_drqn_net_params.pkl'):
@@ -102,7 +101,7 @@ class QMIX:
         q_evals = torch.gather(q_evals, dim=3, index=u).squeeze(3)
 
         # 得到target_q，取所有行为中最大的 Q 值
-        q_targets[avail_u_ == 0.0] = - 9999999
+        q_targets[avail_u_ == 0.0] = - 9999999  # 如果该行为不可选，则把该行为的Q值设为极小值，保证不会被选到
         q_targets = q_targets.max(dim=3)[0]
         # print("q_evals2 shape: ", q_evals.size()) # [batch_size, max_episode_len, n_agents]
 
@@ -110,7 +109,7 @@ class QMIX:
         q_total_eval = self.eval_qmix(q_evals, s)
         q_total_target = self.target_qmix(q_targets, s_)
 
-        # 计算一步 qmix的target
+        # 计算一步 qmix 的target
         targets = r + self.args.gamma * q_total_target * (1 - terminated)
         # 参数更新
         td_error = (q_total_eval - targets.detach())
